@@ -1,0 +1,581 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  MANAGER
+  TECHNICIAN
+  CUSTOMER
+  @@map("user_role")
+}
+
+enum JobStatus {
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  @@map("job_status")
+}
+
+enum EstimateStatus {
+  PENDING
+  APPROVED
+  REVISED
+  REJECTED
+  @@map("estimate_status")
+}
+
+enum InvoiceStatus {
+  UNPAID
+  PARTIAL
+  PAID
+  OVERDUE
+  @@map("invoice_status")
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique(map: "User_email_key")
+  password  String
+  name      String
+  role      Role     @default(CUSTOMER)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  employee  Employee?
+  customer  Customer?
+
+  sentMessages     Message[] @relation("SentMessages")
+  receivedMessages Message[] @relation("ReceivedMessages")
+  verification     VerificationRequest?
+  teamMessages     TeamMessage[]
+  calendarEvents   CalendarEvent[] @relation("CreatedBy")
+  jobLedgerEntries JobLedger[]
+  notifications    Notification[]
+
+  @@map("user")
+}
+
+model Customer {
+  id        Int      @id @default(autoincrement())
+  userId    Int?     @unique(map: "Customer_userId_key")
+  name      String
+  phone     String
+  email     String   @unique(map: "Customer_email_key")
+  address   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user      User?    @relation(fields: [userId], references: [id], map: "Customer_userId_fkey")
+  jobs      Job[]
+  estimates Estimate[]
+  invoices  Invoice[]
+  financingApplications FinancingApplication[]
+  calendarEvents        CalendarEvent[]
+  reviews               Review[]
+
+  @@map("customer")
+}
+
+model Employee {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @unique(map: "Employee_userId_key")
+  name      String
+  phone     String?
+  role      Role     @default(TECHNICIAN)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  latitude  Float?
+  longitude Float?
+  lastLocationUpdate DateTime?
+
+  user      User     @relation(fields: [userId], references: [id], map: "Employee_userId_fkey")
+  assignedJobs Job[] @relation("AssignedTo")
+  timesheets Timesheet[]
+  materialRequests MaterialRequest[]
+  calendarEvents   CalendarEvent[]
+
+  @@map("employee")
+}
+
+model Job {
+  id          Int       @id @default(autoincrement())
+  customerId  Int
+  estimateId  Int?      @unique(map: "Job_estimateId_key")
+  title       String
+  description String?   @db.Text
+  assignedTo  Int?
+  status      JobStatus @default(SCHEDULED)
+  priority    String?   @default("Medium")
+  progress    Int       @default(0)
+  scheduledAt DateTime?
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  customer    Customer  @relation(fields: [customerId], references: [id], map: "Job_customerId_fkey")
+  technician  Employee? @relation("AssignedTo", fields: [assignedTo], references: [id], map: "Job_assignedTo_fkey")
+  estimate    Estimate? @relation(fields: [estimateId], references: [id], map: "Job_estimateId_fkey")
+  invoice     Invoice?
+  notes       Note[]
+  photos      Photo[]
+  messages    Message[]
+  calendarEvents CalendarEvent[]
+  jobLedgerEntries JobLedger[]
+  history     JobHistory[]
+  files       JobFile[]
+  reviews     Review[]
+
+  lastLatitude Float?
+  lastLongitude Float?
+  lastLocationUpdate DateTime?
+  trackingActive Boolean @default(false)
+  trackingStartedAt DateTime?
+  trackingStoppedAt DateTime?
+  locationHistory JobLocationHistory[]
+
+  @@index([customerId])
+  @@index([assignedTo])
+  @@map("job")
+}
+
+model JobHistory {
+  id        Int      @id @default(autoincrement())
+  jobId     Int
+  action    String
+  by        String
+  type      String?  // 'status', 'assignment', 'note', etc.
+  createdAt DateTime @default(now())
+
+  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+  @@map("job_history")
+}
+
+model JobLocationHistory {
+  id          Int      @id @default(autoincrement())
+  jobId       Int
+  latitude    Float
+  longitude   Float
+  recordedAt  DateTime @default(now())
+
+  job         Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+  @@map("job_location_history")
+}
+
+model JobFile {
+  id        Int      @id @default(autoincrement())
+  jobId     Int
+  name      String
+  url       String
+  type      String?
+  size      Int?
+  createdAt DateTime @default(now())
+
+  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+  @@map("job_file")
+}
+
+model Note {
+  id        Int      @id @default(autoincrement())
+  jobId     Int
+  content   String
+  createdAt DateTime @default(now())
+
+  job       Job      @relation(fields: [jobId], references: [id], map: "Note_jobId_fkey")
+  @@map("note")
+}
+
+model Photo {
+  id        Int      @id @default(autoincrement())
+  jobId     Int
+  url       String
+  createdAt DateTime @default(now())
+
+  job       Job      @relation(fields: [jobId], references: [id], map: "Photo_jobId_fkey")
+  @@map("photo")
+}
+
+model Estimate {
+  id          Int            @id @default(autoincrement())
+  customerId  Int
+  status      EstimateStatus @default(PENDING)
+  projectTitle String?
+  totalAmount  Decimal        @db.Decimal(10, 2)
+  notes        String?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  customer     Customer       @relation(fields: [customerId], references: [id], map: "Estimate_customerId_fkey")
+  items        EstimateItem[]
+  job          Job?
+
+  @@map("estimate")
+}
+
+model EstimateItem {
+  id          Int      @id @default(autoincrement())
+  estimateId  Int
+  description String
+  quantity    Int
+  unitPrice   Decimal  @db.Decimal(10, 2)
+  total       Decimal  @db.Decimal(10, 2)
+
+  estimate    Estimate @relation(fields: [estimateId], references: [id], map: "EstimateItem_estimateId_fkey")
+  @@map("estimateitem")
+}
+
+model Invoice {
+  id         Int           @id @default(autoincrement())
+  customerId Int
+  jobId      Int?          @unique(map: "Invoice_jobId_key")
+  status     InvoiceStatus @default(UNPAID)
+  total      Decimal       @db.Decimal(10, 2)
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  customer   Customer      @relation(fields: [customerId], references: [id], map: "Invoice_customerId_fkey")
+  job        Job?          @relation(fields: [jobId], references: [id], map: "Invoice_jobId_fkey")
+  payments   Payment[]
+
+  @@map("invoice")
+}
+
+model Payment {
+  id        Int      @id @default(autoincrement())
+  invoiceId Int
+  amount    Decimal  @db.Decimal(10, 2)
+  type      String   // LABOR, MATERIAL, etc.
+  createdAt DateTime @default(now())
+
+  invoice   Invoice  @relation(fields: [invoiceId], references: [id], map: "Payment_invoiceId_fkey")
+  @@map("payment")
+}
+
+model Timesheet {
+  id          Int      @id @default(autoincrement())
+  employeeId  Int
+  date        DateTime @db.Date
+  clockIn     DateTime
+  clockOut    DateTime?
+  totalHours  Decimal? @db.Decimal(5, 2)
+  status      String   @default("PENDING") // PENDING, APPROVED, REJECTED
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  employee    Employee @relation(fields: [employeeId], references: [id], map: "Timesheet_employeeId_fkey")
+  @@map("timesheet")
+}
+
+model MaterialRequest {
+  id          Int      @id @default(autoincrement())
+  employeeId  Int
+  name        String
+  sku         String
+  quantity    Int
+  status      String   @default("PENDING") // PENDING, APPROVED, REJECTED
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  employee    Employee @relation(fields: [employeeId], references: [id], map: "MaterialRequest_employeeId_fkey")
+  @@map("materialrequest")
+}
+
+model Message {
+  id          Int      @id @default(autoincrement())
+  senderId    Int
+  receiverId  Int
+  jobId       Int?
+  content     String   @db.Text
+  isRead      Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  sender      User     @relation("SentMessages", fields: [senderId], references: [id], map: "Message_senderId_fkey")
+  receiver    User     @relation("ReceivedMessages", fields: [receiverId], references: [id], map: "Message_receiverId_fkey")
+  job         Job?     @relation(fields: [jobId], references: [id], map: "Message_jobId_fkey")
+  @@map("message")
+}
+
+model VerificationRequest {
+  id          Int      @id @default(autoincrement())
+  userId      Int      @unique(map: "VerificationRequest_userId_key")
+  idPhotoUrl  String?  @db.Text
+  selfieUrl   String?  @db.Text
+  status      String   @default("PENDING") // PENDING, APPROVED, REJECTED
+  reason      String?  @db.Text
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user        User     @relation(fields: [userId], references: [id], map: "VerificationRequest_userId_fkey")
+  @@map("verificationrequest")
+}
+
+model FinancingApplication {
+  id              Int      @id @default(autoincrement())
+  customerId      Int
+  provider        String
+  amount          Decimal  @db.Decimal(10, 2)
+  annualIncome    Decimal  @db.Decimal(10, 2)
+  ssnLast4        String
+  term            String   @default("12 Months")
+  apr             String   @default("0%")
+  status          String   @default("PENDING") // PENDING, APPROVED, REJECTED
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  customer        Customer @relation(fields: [customerId], references: [id], map: "FinancingApplication_customerId_fkey")
+  @@map("financingapplication")
+}
+
+model Integration {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique(map: "Integration_name_key")
+  category  String   // 'SUPPLIER' or 'GATEWAY'
+  status    String   @default("Not Connected")
+  desc      String?
+  icon      String?
+  config    String?  @db.LongText
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@map("integration")
+}
+
+model TeamMessage {
+  id        Int      @id @default(autoincrement())
+  senderId  Int
+  content   String   @db.Text
+  createdAt DateTime @default(now())
+
+  sender    User     @relation(fields: [senderId], references: [id], map: "TeamMessage_senderId_fkey")
+  @@map("teammessage")
+}
+
+model Material {
+  id              Int      @id @default(autoincrement())
+  name            String   @unique(map: "Material_name_key")
+  sku             String?
+  qty             Int      @default(0)
+  unit            String?  // 'pcs', 'ft', 'box'
+  price           Decimal? @default(0.00) @db.Decimal(10, 2)
+  lowesPrice      Decimal? @db.Decimal(10, 2)
+  homeDepotPrice  Decimal? @db.Decimal(10, 2)
+  supplierId      Int?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  supplier        Supplier? @relation(fields: [supplierId], references: [id])
+
+  @@index([supplierId])
+  @@map("material")
+}
+
+model Supplier {
+  id        Int        @id @default(autoincrement())
+  name      String
+  email     String?
+  phone     String?
+  address   String?
+  type      String?    // 'Internal', 'External'
+  materials Material[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@map("supplier")
+}
+
+model FinancingProvider {
+  id        Int      @id @default(autoincrement())
+  name      String
+  type      String?  // 'Internal', 'External'
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("financing_provider")
+}
+
+model CalendarEvent {
+  id           Int      @id @default(autoincrement())
+  title        String
+  date         DateTime @db.Date
+  time         String?
+  technicianId Int?
+  jobId        Int?
+  customerId   Int?
+  notes        String?  @db.Text
+  priority     String   @default("Medium")
+  createdById  Int
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  createdBy    User      @relation("CreatedBy", fields: [createdById], references: [id], map: "CalendarEvent_createdById_fkey")
+  technician   Employee? @relation(fields: [technicianId], references: [id], map: "CalendarEvent_technicianId_fkey")
+  job          Job?      @relation(fields: [jobId], references: [id], map: "CalendarEvent_jobId_fkey")
+  customer     Customer? @relation(fields: [customerId], references: [id], map: "CalendarEvent_customerId_fkey")
+  @@map("calendarevent")
+}
+
+enum LedgerType {
+  CREDIT
+  DEBIT
+  @@map("jobledger_type")
+}
+
+enum LedgerCategory {
+  DEPOSIT
+  MATERIAL
+  LABOR
+  PERMIT
+  SUBCONTRACTOR
+  EQUIPMENT
+  MISC
+  @@map("jobledger_category")
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  TRANSFER
+  CHECK
+  @@map("jobledger_paymentMethod")
+}
+
+enum LeadStatus {
+  NEW
+  REVIEWING
+  SCHEDULED
+  REJECTED
+  CONVERTED
+  @@map("lead_status")
+}
+
+model JobLedger {
+  id              Int            @id @default(autoincrement())
+  jobId           Int
+  type            LedgerType
+  category        LedgerCategory
+  amount          Decimal        @db.Decimal(10, 2)
+  paymentMethod   PaymentMethod?
+  referenceNumber String?
+  note            String?        @db.Text
+  transactionDate DateTime       @default(now())
+  createdById     Int
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime @updatedAt
+
+  job       Job  @relation(fields: [jobId], references: [id], map: "JobLedger_jobId_fkey")
+  createdBy User @relation(fields: [createdById], references: [id], map: "JobLedger_createdById_fkey")
+
+  @@index([jobId], map: "JobLedger_jobId_idx")
+  @@map("jobledger")
+}
+
+model Lead {
+  id                String     @id @default(cuid())
+  firstName         String
+  lastName          String
+  email             String
+  phone             String
+  address           String
+  city              String
+  state             String
+  zipCode           String
+  serviceType       String
+  jobDescription    String     @db.Text
+  preferredDate     DateTime?
+  preferredTimeSlot String?
+  status            LeadStatus @default(NEW)
+  
+  // Schedule Proposal
+  proposedDate      DateTime?
+  proposedTimeSlot  String?
+  internalNote      String?    @db.Text
+  customerMessage   String?    @db.Text
+  pricingData       Json?
+  
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime @updatedAt
+  @@map("lead")
+}
+
+model Settings {
+  id                Int      @id @default(1)
+  
+  // Company Info
+  companyName       String   @default("FieldSync Pro")
+  businessEmail     String   @default("admin@fieldsync.pro")
+  phoneNumber       String   @default("(555) 000-1234")
+  
+  // Social Media
+  facebookUrl       String?
+  instagramUrl      String?
+  websiteUrl        String?
+  
+  // Notification Settings
+  emailNotifications Boolean  @default(true)
+  smsNotifications   Boolean  @default(false)
+  pushNotifications  Boolean  @default(true)
+  dailyDigest        Boolean  @default(false)
+  
+  // Role Permissions
+  adminFullAccess    Boolean  @default(true)
+  managerDispatch    Boolean  @default(true)
+  technicianField    Boolean  @default(true)
+  customerPortal     Boolean  @default(true)
+  
+  // Security
+  twoFactorAuth      Boolean  @default(false)
+  sessionTimeout     Boolean  @default(true)
+  ipWhitelisting     Boolean  @default(false)
+
+  updatedAt         DateTime @updatedAt
+  
+  @@map("settings")
+}
+
+model Notification {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  type      String   // MESSAGE, JOB_ASSIGNED, LEAD_NEW, VERIFICATION_UPDATE
+  title     String
+  message   String   @db.Text
+  link      String?  // Optional URL to navigate to (e.g., /jobs/123)
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade, map: "Notification_userId_fkey")
+
+  @@index([userId], map: "Notification_userId_idx")
+  @@map("notification")
+}
+
+model Review {
+  id          Int      @id @default(autoincrement())
+  customerId  Int
+  jobId       Int?
+  rating      Int      // 1-5
+  comment     String   @db.Text
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  customer    Customer @relation(fields: [customerId], references: [id])
+  job         Job?     @relation(fields: [jobId], references: [id])
+
+  @@index([customerId])
+  @@index([jobId])
+  @@map("review")
+}
