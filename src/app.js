@@ -7,7 +7,13 @@ const { errorHandler } = require('./middlewares/error');
 
 const app = express();
 
-app.use(cors());
+app.use(cors({
+  origin: [
+      "https://field-service.kiaansoftware.com",
+      "http://localhost:5173"
+    ],
+    credentials: true
+}));
 app.use(morgan('dev'));
 app.use(express.json());
 
