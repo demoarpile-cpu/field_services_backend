@@ -1,4 +1,5 @@
 const messagesService = require('./messages.service');
+const { getIO, getOnlineUsers } = require('../../socket');
 
 const getConversations = async (req, res, next) => {
   try {
@@ -20,6 +21,14 @@ const sendMessage = async (req, res, next) => {
   try {
     const { receiverId, content, jobId } = req.body;
     const msg = await messagesService.sendMessage(req.user.id, receiverId, content, jobId);
+    const io = getIO();
+    const onlineUsers = getOnlineUsers();
+    const receiverSocketId = onlineUsers.get(Number(receiverId));
+
+    if (io && receiverSocketId) {
+      io.to(receiverSocketId).emit('receive_message', msg);
+    }
+
     res.status(201).json(msg);
   } catch (e) { next(e); }
 };

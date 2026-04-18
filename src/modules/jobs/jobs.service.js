@@ -2,6 +2,7 @@ const prisma = require('../../config/db');
 const TAX_RATE = 0.08;
 
 let scheduledAtBackfilled = false;
+let signatureColumnsEnsured = false;
 
 const normalizeScheduledAt = (value) => {
   if (!value) return null;
@@ -37,8 +38,60 @@ const ensureScheduledAtBackfill = async () => {
   }
 };
 
+const ensureSignatureColumns = async () => {
+  if (signatureColumnsEnsured) return;
+  signatureColumnsEnsured = true;
+  try {
+    await prisma.$executeRawUnsafe(`
+      ALTER TABLE job
+      ADD COLUMN IF NOT EXISTS startSignature TEXT NULL,
+      ADD COLUMN IF NOT EXISTS endSignature TEXT NULL,
+      ADD COLUMN IF NOT EXISTS startSignedAt DATETIME(3) NULL,
+      ADD COLUMN IF NOT EXISTS endSignedAt DATETIME(3) NULL
+    `);
+  } catch (error) {
+    console.error('Failed to ensure job signature columns', error);
+    signatureColumnsEnsured = false;
+  }
+};
+
+const mergeSignatureFields = async (jobs) => {
+  const list = Array.isArray(jobs) ? jobs : [jobs];
+  const validJobs = list.filter(Boolean);
+  if (validJobs.length === 0) return Array.isArray(jobs) ? [] : jobs;
+
+  const ids = validJobs
+    .map((job) => parseInt(job.id, 10))
+    .filter((id) => Number.isInteger(id) && id > 0);
+
+  if (ids.length === 0) return jobs;
+
+  const rows = await prisma.$queryRawUnsafe(`
+    SELECT id, startSignature, endSignature, startSignedAt, endSignedAt
+    FROM job
+    WHERE id IN (${ids.join(',')})
+  `);
+
+  const byId = new Map((rows || []).map((row) => [Number(row.id), row]));
+  const merged = list.map((job) => {
+    if (!job) return job;
+    const row = byId.get(Number(job.id));
+    if (!row) return job;
+    return {
+      ...job,
+      startSignature: row.startSignature ?? null,
+      endSignature: row.endSignature ?? null,
+      startSignedAt: row.startSignedAt ?? null,
+      endSignedAt: row.endSignedAt ?? null
+    };
+  });
+
+  return Array.isArray(jobs) ? merged : merged[0];
+};
+
 const getAll = async (user, filters = {}) => {
   await ensureScheduledAtBackfill();
+  await ensureSignatureColumns();
   const where = {};
 
   if (user.role === 'TECHNICIAN') {
@@ -58,7 +111,7 @@ const getAll = async (user, filters = {}) => {
     where.assignedTo = null;
   }
 
-  return await prisma.job.findMany({
+  const jobs = await prisma.job.findMany({
     where,
     include: { 
       customer: true, 
@@ -71,10 +124,12 @@ const getAll = async (user, filters = {}) => {
       files: true
     }
   });
+  return await mergeSignatureFields(jobs);
 };
 
 const getById = async (id) => {
-  return await prisma.job.findUnique({
+  await ensureSignatureColumns();
+  const job = await prisma.job.findUnique({
     where: { id: parseInt(id) },
     include: { 
       customer: true, 
@@ -87,6 +142,7 @@ const getById = async (id) => {
       files: true
     }
   });
+  return await mergeSignatureFields(job);
 };
 
 const addHistory = async (jobId, action, by, type) => {
@@ -186,7 +242,13 @@ const checkAndGenerateInvoice = async (jobId) => {
 };
 
 const update = async (id, jobData) => {
-  const oldJob = await prisma.job.findUnique({ where: { id: parseInt(id) } });
+  const jobId = parseInt(id, 10);
+  const oldJob = await prisma.job.findUnique({ where: { id: jobId } });
+  if (!oldJob) {
+    const error = new Error('Job not found');
+    error.status = 404;
+    throw error;
+  }
 
   const hasScheduledField =
     Object.prototype.hasOwnProperty.call(jobData, 'scheduledAt') ||
@@ -196,8 +258,21 @@ const update = async (id, jobData) => {
     ? normalizeScheduledAt(jobData.scheduledAt || jobData.scheduledDate) || new Date()
     : (oldJob?.scheduledAt || new Date());
 
+  const requestedStatus = String(jobData.status || '').toUpperCase().replace(/\s+/g, '_');
+  const previousStatus = String(oldJob?.status || '').toUpperCase();
+  if (requestedStatus === 'IN_PROGRESS' && previousStatus !== 'IN_PROGRESS') {
+    const jobFresh = await mergeSignatureFields(oldJob);
+    const hasStartSignature =
+      typeof jobFresh?.startSignature === 'string' && jobFresh.startSignature.trim().length > 0;
+    if (!hasStartSignature) {
+      const error = new Error('Customer start signature is required before starting the job.');
+      error.status = 400;
+      throw error;
+    }
+  }
+
   const updated = await prisma.job.update({
-    where: { id: parseInt(id) },
+    where: { id: jobId },
     data: {
       ...jobData,
       scheduledAt: normalizedScheduledAt
@@ -216,14 +291,34 @@ const update = async (id, jobData) => {
 };
 
 const updateStatus = async (id, status) => {
-  const oldJob = await prisma.job.findUnique({ where: { id: parseInt(id) } });
+  const jobId = parseInt(id, 10);
+  const jobRecord = await prisma.job.findUnique({ where: { id: jobId } });
+  if (!jobRecord) {
+    const error = new Error('Job not found');
+    error.status = 404;
+    throw error;
+  }
+
+  const jobFresh = await mergeSignatureFields(jobRecord);
+  const requestedStatus = String(status || '').toUpperCase();
+  const previousStatus = String(jobRecord.status || '').toUpperCase();
+
+  if (requestedStatus === 'IN_PROGRESS' && previousStatus !== 'IN_PROGRESS') {
+    const hasStartSignature =
+      typeof jobFresh?.startSignature === 'string' && jobFresh.startSignature.trim().length > 0;
+    if (!hasStartSignature) {
+      const error = new Error('Customer start signature is required before starting the job.');
+      error.status = 400;
+      throw error;
+    }
+  }
   
   const job = await prisma.job.update({
-    where: { id: parseInt(id) },
+    where: { id: jobId },
     data: { status }
   });
 
-  if (status !== oldJob.status) {
+  if (status !== jobRecord.status) {
     addHistory(id, `Status updated to ${status}`, 'System', 'status');
     if (status === 'COMPLETED') {
       await checkAndGenerateInvoice(id);
@@ -397,6 +492,80 @@ const stopTracking = async (id) => {
   return { success: true };
 };
 
+const saveStartSignature = async (id, signature, user) => {
+  await ensureSignatureColumns();
+  const jobId = parseInt(id, 10);
+  const value = typeof signature === 'string' ? signature.trim() : '';
+  if (!value) {
+    const error = new Error('Start signature is required');
+    error.status = 400;
+    throw error;
+  }
+
+  const job = await prisma.job.findUnique({ where: { id: jobId } });
+  if (!job) {
+    const error = new Error('Job not found');
+    error.status = 404;
+    throw error;
+  }
+  const isTechnician = user?.role === 'TECHNICIAN';
+  if (job.startSignature && !isTechnician) {
+    const error = new Error('Start signature already submitted');
+    error.status = 400;
+    throw error;
+  }
+
+  await prisma.$executeRaw`
+    UPDATE job
+    SET startSignature = ${value},
+        startSignedAt = NOW(3)
+    WHERE id = ${jobId}
+  `;
+  const by = isTechnician ? (user?.name || 'Technician') : 'Customer';
+  const action = job.startSignature && isTechnician
+    ? 'Start signature updated (technician)'
+    : 'Start signature captured';
+  await addHistory(jobId, action, by, 'signature');
+  return await getById(jobId);
+};
+
+const saveEndSignature = async (id, signature, user) => {
+  await ensureSignatureColumns();
+  const jobId = parseInt(id, 10);
+  const value = typeof signature === 'string' ? signature.trim() : '';
+  if (!value) {
+    const error = new Error('End signature is required');
+    error.status = 400;
+    throw error;
+  }
+
+  const job = await prisma.job.findUnique({ where: { id: jobId } });
+  if (!job) {
+    const error = new Error('Job not found');
+    error.status = 404;
+    throw error;
+  }
+  const isTechnician = user?.role === 'TECHNICIAN';
+  if (job.endSignature && !isTechnician) {
+    const error = new Error('End signature already submitted');
+    error.status = 400;
+    throw error;
+  }
+
+  await prisma.$executeRaw`
+    UPDATE job
+    SET endSignature = ${value},
+        endSignedAt = NOW(3)
+    WHERE id = ${jobId}
+  `;
+  const by = isTechnician ? (user?.name || 'Technician') : 'Customer';
+  const action = job.endSignature && isTechnician
+    ? 'Completion signature updated (technician)'
+    : 'Completion signature captured';
+  await addHistory(jobId, action, by, 'signature');
+  return await getById(jobId);
+};
+
 module.exports = { 
   getAll, 
   getById, 
@@ -414,5 +583,7 @@ module.exports = {
   getLocationHistory,
   getTrackingStatus,
   startTracking,
-  stopTracking
+  stopTracking,
+  saveStartSignature,
+  saveEndSignature
 };

@@ -1,6 +1,27 @@
 const { randomUUID } = require('crypto');
 const prisma = require('../../config/db');
+const { hashPassword } = require('../../utils/hash');
+const { sendPortalCredentialsEmail } = require('../../utils/email');
 const TAX_RATE = 0.08;
+let leadColumnsEnsured = false;
+
+const ensureLeadColumns = async () => {
+  if (leadColumnsEnsured) return;
+  leadColumnsEnsured = true;
+  try {
+    await prisma.$executeRawUnsafe(`
+      ALTER TABLE lead
+      ADD COLUMN IF NOT EXISTS proposedDate DATETIME(3) NULL,
+      ADD COLUMN IF NOT EXISTS proposedTimeSlot VARCHAR(191) NULL,
+      ADD COLUMN IF NOT EXISTS internalNote TEXT NULL,
+      ADD COLUMN IF NOT EXISTS customerMessage TEXT NULL,
+      ADD COLUMN IF NOT EXISTS pricingData JSON NULL
+    `);
+  } catch (error) {
+    leadColumnsEnsured = false;
+    console.error('Failed to ensure lead columns', error);
+  }
+};
 
 const normalizeLineItems = (items = []) => {
   return (items || []).map((item) => {
@@ -28,6 +49,54 @@ const buildPricingSnapshot = (items = []) => {
     tax,
     total
   };
+};
+
+const generateTemporaryPassword = () => {
+  return `FS-${randomUUID().replace(/-/g, '').slice(0, 12)}`;
+};
+
+const ensureCustomerPortalUser = async (tx, customer, lead) => {
+  if (!customer || customer.userId) {
+    return { customer, isNewUserCreated: false, temporaryPassword: null };
+  }
+
+  const email = typeof lead?.email === 'string' ? lead.email.trim().toLowerCase() : '';
+  if (!email) {
+    return { customer, isNewUserCreated: false, temporaryPassword: null };
+  }
+
+  const existingUser = await tx.user.findUnique({
+    where: { email },
+    include: { customer: true }
+  });
+
+  if (existingUser) {
+    if (!existingUser.customer || existingUser.customer.id === customer.id) {
+      const linkedCustomer = await tx.customer.update({
+        where: { id: customer.id },
+        data: { userId: existingUser.id }
+      });
+      return { customer: linkedCustomer, isNewUserCreated: false, temporaryPassword: null };
+    }
+    return { customer, isNewUserCreated: false, temporaryPassword: null };
+  }
+
+  const temporaryPassword = generateTemporaryPassword();
+
+  const user = await tx.user.create({
+    data: {
+      email,
+      password: await hashPassword(temporaryPassword),
+      name: `${lead.firstName} ${lead.lastName}`.trim(),
+      role: 'CUSTOMER'
+    }
+  });
+
+  const linkedCustomer = await tx.customer.update({
+    where: { id: customer.id },
+    data: { userId: user.id }
+  });
+  return { customer: linkedCustomer, isNewUserCreated: true, temporaryPassword };
 };
 
 /**
@@ -68,12 +137,14 @@ const create = async (data) => {
  * Internal Lead Management
  */
 const getAll = async () => {
+  await ensureLeadColumns();
   return await prisma.lead.findMany({
     orderBy: { createdAt: 'desc' }
   });
 };
 
 const getById = async (id) => {
+  await ensureLeadColumns();
   return await prisma.lead.findUnique({
     where: { id }
   });
@@ -90,6 +161,7 @@ const updateStatus = async (id, status) => {
  * Propose Schedule
  */
 const proposeSchedule = async (id, data) => {
+  await ensureLeadColumns();
   return await prisma.lead.update({
     where: { id },
     data: {
@@ -103,6 +175,7 @@ const proposeSchedule = async (id, data) => {
 };
 
 const updatePricing = async (id, data) => {
+  await ensureLeadColumns();
   const pricing = buildPricingSnapshot(data?.items || []);
   return await prisma.lead.update({
     where: { id },
@@ -119,11 +192,12 @@ const updatePricing = async (id, data) => {
  * 3. Update Lead Status
  */
 const convertToJob = async (id, payload = {}) => {
+  await ensureLeadColumns();
   const lead = await prisma.lead.findUnique({ where: { id } });
   if (!lead) throw new Error('Lead not found');
   if (lead.status === 'CONVERTED') throw new Error('Lead already converted');
 
-  return await prisma.$transaction(async (tx) => {
+  const conversionResult = await prisma.$transaction(async (tx) => {
     // 1. Find or Create Customer
     let customer = await tx.customer.findFirst({
       where: {
@@ -144,6 +218,9 @@ const convertToJob = async (id, payload = {}) => {
         }
       });
     }
+
+    const portalUserResult = await ensureCustomerPortalUser(tx, customer, lead);
+    customer = portalUserResult.customer;
 
     // 2. Create Estimate from saved lead pricing (if any)
     const payloadPricing = buildPricingSnapshot(payload?.items || []);
@@ -188,8 +265,22 @@ const convertToJob = async (id, payload = {}) => {
       data: { status: 'CONVERTED' }
     });
 
-    return job;
+    return {
+      job,
+      portalUserResult
+    };
   });
+
+  if (conversionResult?.portalUserResult?.isNewUserCreated && lead.email && conversionResult.portalUserResult.temporaryPassword) {
+    sendPortalCredentialsEmail({
+      email: lead.email.trim().toLowerCase(),
+      temporaryPassword: conversionResult.portalUserResult.temporaryPassword
+    }).catch((error) => {
+      console.error('Failed to send portal credentials email', error);
+    });
+  }
+
+  return conversionResult.job;
 };
 
 module.exports = {

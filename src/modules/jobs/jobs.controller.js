@@ -206,6 +206,24 @@ const stopTracking = async (req, res, next) => {
   }
 };
 
+const addStartSignature = async (req, res, next) => {
+  try {
+    const job = await jobsService.saveStartSignature(req.params.id, req.body.signature, req.user);
+    res.json(withScheduledDate(job));
+  } catch (error) {
+    next(error);
+  }
+};
+
+const addEndSignature = async (req, res, next) => {
+  try {
+    const job = await jobsService.saveEndSignature(req.params.id, req.body.signature, req.user);
+    res.json(withScheduledDate(job));
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = { 
   getAll, 
   getById, 
@@ -223,5 +241,7 @@ module.exports = {
   getLocationHistory,
   getTrackingStatus,
   startTracking,
-  stopTracking
+  stopTracking,
+  addStartSignature,
+  addEndSignature
 };

@@ -64,6 +64,20 @@ const initSocket = (server) => {
       }
     });
 
+    socket.on('send_team_message', async (data) => {
+      try {
+        const { content } = data;
+        const senderId = Number(socket.userId);
+        if (!content || !String(content).trim()) return;
+
+        const savedMessage = await messagesService.sendTeamMessage(senderId, String(content).trim());
+        io.emit('receive_team_message', savedMessage);
+      } catch (error) {
+        console.error('[Socket] send_team_message error:', error);
+        socket.emit('error', { message: 'Failed to send team message' });
+      }
+    });
+
     socket.on('disconnect', () => {
       onlineUsers.delete(userId);
       console.log(`[Socket] User disconnected: ${userId}`);

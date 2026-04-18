@@ -23,5 +23,7 @@ router.get('/:id/location-history', authenticate, jobsController.getLocationHist
 router.get('/:id/tracking-status', authenticate, jobsController.getTrackingStatus);
 router.patch('/:id/start-tracking', authenticate, jobsController.startTracking);
 router.patch('/:id/stop-tracking', authenticate, jobsController.stopTracking);
+router.post('/:id/start-signature', authenticate, jobsController.addStartSignature);
+router.post('/:id/end-signature', authenticate, jobsController.addEndSignature);
 
 module.exports = router;

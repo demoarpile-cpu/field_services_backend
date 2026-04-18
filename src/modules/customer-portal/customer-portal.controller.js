@@ -39,7 +39,12 @@ const getJobDetails = async (req, res, next) => {
 
 const updateEstimateStatus = async (req, res, next) => {
   try {
-    const estimate = await customerPortalService.updateEstimateStatus(req.user.id, req.params.id, req.body.status);
+    const estimate = await customerPortalService.updateEstimateStatus(
+      req.user.id,
+      req.params.id,
+      req.body.status,
+      req.body.customerSignature
+    );
     res.json(estimate);
   } catch (e) { next(e); }
 };

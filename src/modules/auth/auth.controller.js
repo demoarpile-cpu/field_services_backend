@@ -18,4 +18,19 @@ const me = async (req, res, next) => {
   }
 };
 
-module.exports = { login, me };
+const changePassword = async (req, res, next) => {
+  try {
+    const { currentPassword, newPassword, confirmPassword } = req.body;
+    const result = await authService.changePassword(
+      req.user.id,
+      currentPassword,
+      newPassword,
+      confirmPassword
+    );
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+};
+
+module.exports = { login, me, changePassword };

@@ -119,6 +119,10 @@ model Job {
   progress    Int       @default(0)
   scheduledAt DateTime?
   completedAt DateTime?
+  startSignature String? @db.Text
+  endSignature   String? @db.Text
+  startSignedAt  DateTime?
+  endSignedAt    DateTime?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
@@ -217,6 +221,9 @@ model Estimate {
   projectTitle String?
   totalAmount  Decimal        @db.Decimal(10, 2)
   notes        String?
+  customerSignature String?   @db.Text
+  approvedAt   DateTime?
+  declinedAt   DateTime?
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
 
@@ -245,6 +252,7 @@ model Invoice {
   jobId      Int?          @unique(map: "Invoice_jobId_key")
   status     InvoiceStatus @default(UNPAID)
   total      Decimal       @db.Decimal(10, 2)
+  notes      String?       @db.Text
   createdAt  DateTime      @default(now())
   updatedAt  DateTime      @updatedAt
 
@@ -541,6 +549,13 @@ model Settings {
   twoFactorAuth      Boolean  @default(false)
   sessionTimeout     Boolean  @default(true)
   ipWhitelisting     Boolean  @default(false)
+
+  // Business Branding
+  businessName      String?
+  logoUrl           String?
+  businessPhone     String?
+  businessContactEmail String?
+  businessAddress   String? @db.Text
 
   updatedAt         DateTime @updatedAt
   

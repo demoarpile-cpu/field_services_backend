@@ -23,6 +23,16 @@ const calculateTotalsFromItems = (items = []) => {
   return { subtotal, tax, total };
 };
 
+const normalizeEstimateStatus = (status, fallback = 'PENDING') => {
+  if (!status) return fallback;
+  const value = String(status).trim().toUpperCase();
+  if (value === 'DRAFT' || value === 'PENDING') return 'PENDING';
+  if (value === 'APPROVED') return 'APPROVED';
+  if (value === 'REVISED') return 'REVISED';
+  if (value === 'REJECTED' || value === 'DECLINED') return 'REJECTED';
+  return fallback;
+};
+
 const getAll = async (user) => {
   const where = user.role === 'CUSTOMER' ? { customerId: user.customer.id } : {};
   return await prisma.estimate.findMany({
@@ -42,7 +52,7 @@ const create = async (estimateData) => {
       customerId: parseInt(customerId),
       projectTitle,
       notes,
-      status: status || 'PENDING',
+      status: normalizeEstimateStatus(status),
       totalAmount: total || 0,
       items: {
         create: mappedItems
@@ -70,7 +80,7 @@ const update = async (id, estimateData) => {
     data: {
       projectTitle: projectTitle ?? existingEstimate?.projectTitle,
       notes: notes ?? existingEstimate?.notes,
-      status: status ? (status === 'Draft' ? 'PENDING' : status) : existingEstimate?.status,
+      status: normalizeEstimateStatus(status, existingEstimate?.status || 'PENDING'),
       totalAmount: total,
       ...(hasItemsUpdate ? { items: { create: mappedItems } } : {})
     },
@@ -81,7 +91,7 @@ const update = async (id, estimateData) => {
 const approve = async (id) => {
   const estimate = await prisma.estimate.update({
     where: { id: parseInt(id) },
-    data: { status: 'APPROVED' },
+    data: { status: 'APPROVED', approvedAt: new Date(), declinedAt: null },
     include: { customer: true, items: true }
   });
 
