@@ -9,7 +9,7 @@ const BUSINESS_FIELDS = [
   'businessContactEmail',
   'businessAddress'
 ];
-
+{/*
 const ensureBusinessColumns = async () => {
   await prisma.$executeRawUnsafe(`
     ALTER TABLE settings
@@ -19,6 +19,40 @@ const ensureBusinessColumns = async () => {
       ADD COLUMN IF NOT EXISTS businessContactEmail VARCHAR(191) NULL,
       ADD COLUMN IF NOT EXISTS businessAddress TEXT NULL
   `);
+};
+*/}
+const ensureBusinessColumns = async () => {
+  const columns = await prisma.$queryRawUnsafe(`
+    SHOW COLUMNS FROM settings
+  `);
+
+  const existing = columns.map(col => col.Field);
+
+  const queries = [];
+
+  if (!existing.includes('businessName')) {
+    queries.push(`ALTER TABLE settings ADD COLUMN businessName VARCHAR(191) NULL`);
+  }
+
+  if (!existing.includes('logoUrl')) {
+    queries.push(`ALTER TABLE settings ADD COLUMN logoUrl VARCHAR(191) NULL`);
+  }
+
+  if (!existing.includes('businessPhone')) {
+    queries.push(`ALTER TABLE settings ADD COLUMN businessPhone VARCHAR(191) NULL`);
+  }
+
+  if (!existing.includes('businessContactEmail')) {
+    queries.push(`ALTER TABLE settings ADD COLUMN businessContactEmail VARCHAR(191) NULL`);
+  }
+
+  if (!existing.includes('businessAddress')) {
+    queries.push(`ALTER TABLE settings ADD COLUMN businessAddress TEXT NULL`);
+  }
+
+  for (const query of queries) {
+    await prisma.$executeRawUnsafe(query);
+  }
 };
 
 const ensureSettingsRow = async () => {
