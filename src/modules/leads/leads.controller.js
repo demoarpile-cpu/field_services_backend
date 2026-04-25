@@ -70,6 +70,17 @@ const convertToJob = async (req, res) => {
   }
 };
 
+const exportLeads = async (req, res) => {
+  try {
+    const csv = await leadService.exportLeads();
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="leads.csv"');
+    res.send(csv);
+  } catch (error) {
+    res.status(500).json({ success: false, error: 'Failed to export leads' });
+  }
+};
+
 module.exports = {
   createLead,
   getAllLeads,
@@ -77,5 +88,6 @@ module.exports = {
   updateLeadStatus,
   proposeSchedule,
   updateLeadPricing,
-  convertToJob
+  convertToJob,
+  exportLeads
 };

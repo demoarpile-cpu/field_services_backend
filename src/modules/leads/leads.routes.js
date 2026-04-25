@@ -13,6 +13,7 @@ router.post('/', leadController.createLead);
  * Protected Routes (Admin/Manager)
  */
 router.get('/', authenticate, authorize(['ADMIN', 'MANAGER']), leadController.getAllLeads);
+router.get('/export', authenticate, authorize(['ADMIN', 'MANAGER']), leadController.exportLeads);
 router.get('/:id', authenticate, authorize(['ADMIN', 'MANAGER']), leadController.getLeadById);
 router.patch('/:id/status', authenticate, authorize(['ADMIN', 'MANAGER']), leadController.updateLeadStatus);
 router.patch('/:id/pricing', authenticate, authorize(['ADMIN', 'MANAGER']), leadController.updateLeadPricing);

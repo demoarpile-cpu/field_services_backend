@@ -283,6 +283,25 @@ const convertToJob = async (id, payload = {}) => {
   return conversionResult.job;
 };
 
+const exportLeads = async () => {
+  await ensureLeadColumns();
+  const leads = await prisma.lead.findMany({
+    orderBy: { createdAt: 'desc' }
+  });
+  
+  const headers = ['Full Name', 'Phone', 'Email', 'Service', 'Preferred Date', 'Status'];
+  const rows = leads.map(lead => [
+    `"${lead.firstName} ${lead.lastName}"`,
+    `"${lead.phone}"`,
+    `"${lead.email}"`,
+    `"${lead.serviceType}"`,
+    lead.preferredDate ? lead.preferredDate.toISOString().split('T')[0] : 'N/A',
+    lead.status
+  ]);
+  
+  return [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+};
+
 module.exports = {
   create,
   getAll,
@@ -290,5 +309,6 @@ module.exports = {
   updateStatus,
   proposeSchedule,
   updatePricing,
-  convertToJob
+  convertToJob,
+  exportLeads
 };
