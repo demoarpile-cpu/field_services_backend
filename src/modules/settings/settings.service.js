@@ -10,17 +10,6 @@ const BUSINESS_FIELDS = [
   'businessAddress'
 ];
 
-const ensureBusinessColumns = async () => {
-  await prisma.$executeRawUnsafe(`
-    ALTER TABLE settings
-      ADD COLUMN IF NOT EXISTS businessName VARCHAR(191) NULL,
-      ADD COLUMN IF NOT EXISTS logoUrl VARCHAR(191) NULL,
-      ADD COLUMN IF NOT EXISTS businessPhone VARCHAR(191) NULL,
-      ADD COLUMN IF NOT EXISTS businessContactEmail VARCHAR(191) NULL,
-      ADD COLUMN IF NOT EXISTS businessAddress TEXT NULL
-  `);
-};
-
 const ensureSettingsRow = async () => {
   let settings = await prisma.settings.findUnique({
     where: { id: SETTINGS_ID }
@@ -52,7 +41,7 @@ const updateSettings = async (updatedData) => {
 
 const pickBusinessFields = (payload = {}) => {
   return BUSINESS_FIELDS.reduce((acc, field) => {
-    if (Object.prototype.hasOwnProperty.call(payload, field)) {
+    if (payload[field] !== undefined) {
       acc[field] = payload[field];
     }
     return acc;
@@ -61,44 +50,34 @@ const pickBusinessFields = (payload = {}) => {
 
 const getBusinessSettings = async () => {
   await ensureSettingsRow();
-  await ensureBusinessColumns();
 
-  const rows = await prisma.$queryRawUnsafe(`
-    SELECT businessName, logoUrl, businessPhone, businessContactEmail, businessAddress
-    FROM settings
-    WHERE id = 1
-    LIMIT 1
-  `);
+  const settings = await prisma.settings.findUnique({
+    where: { id: SETTINGS_ID },
+    select: {
+      businessName: true,
+      logoUrl: true,
+      businessPhone: true,
+      businessContactEmail: true,
+      businessAddress: true
+    }
+  });
 
-  const row = Array.isArray(rows) && rows.length > 0 ? rows[0] : {};
-  return pickBusinessFields(row);
+  return settings || {};
 };
 
 const updateBusinessSettings = async (payload) => {
   const businessData = pickBusinessFields(payload);
-  await ensureSettingsRow();
-  await ensureBusinessColumns();
 
-  const {
-    businessName = null,
-    logoUrl = null,
-    businessPhone = null,
-    businessContactEmail = null,
-    businessAddress = null
-  } = businessData;
+  const updated = await prisma.settings.upsert({
+    where: { id: SETTINGS_ID },
+    update: businessData,
+    create: {
+      id: SETTINGS_ID,
+      ...businessData
+    }
+  });
 
-  await prisma.$executeRaw`
-    UPDATE settings
-    SET
-      businessName = ${businessName},
-      logoUrl = ${logoUrl},
-      businessPhone = ${businessPhone},
-      businessContactEmail = ${businessContactEmail},
-      businessAddress = ${businessAddress}
-    WHERE id = ${SETTINGS_ID}
-  `;
-
-  return getBusinessSettings();
+  return pickBusinessFields(updated);
 };
 
 module.exports = {
