@@ -100,7 +100,7 @@ const getRevenueHistory = async () => {
     SELECT 
       MONTH(createdAt) as monthNum, 
       SUM(amount) as total 
-    FROM Payment 
+    FROM payment 
     WHERE createdAt >= DATE_SUB(NOW(), INTERVAL 12 MONTH)
     GROUP BY MONTH(createdAt)
     ORDER BY MIN(createdAt) ASC
