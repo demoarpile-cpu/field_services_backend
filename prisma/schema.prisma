@@ -270,7 +270,7 @@ model Payment {
   type      String   // LABOR, MATERIAL, etc.
   createdAt DateTime @default(now())
 
-  invoice   Invoice  @relation(fields: [invoiceId], references: [id], map: "Payment_invoiceId_fkey")
+  invoice   Invoice  @relation(fields: [invoiceId], references: [id], map: "payment_invoiceId_fkey")
   @@map("payment")
 }
 
